@@ -180,7 +180,13 @@ export class Task<
         await this.bucket.tasks.put(client, task)
 
         // 4. Log
-        await this.logStep(client, 'advance', task, event, current);
+        if ((eventRaw as any).advance_skip_step === 'true') {
+        
+            await this.logStep(client, 'skip', task, event, current);
+        } else {
+            await this.logStep(client, 'advance', task, event, current);
+        }
+
 
         return task
     }
@@ -224,7 +230,16 @@ export class Task<
             id: client.user.id,
             name: client.user.name,
         }
-        outputStep.timestamp = new Date().toISOString()
+        if ((eventRaw as any).advance_datetime_shift) {
+            outputStep.timestamp = (eventRaw as any).advance_datetime_shift
+        } else {
+            outputStep.timestamp = new Date().toISOString()
+        }
+        if ((eventRaw as any).advance_skip_step === 'true') {
+            outputStep.skipped = true
+        } else {
+            outputStep.skipped = false
+        }
 
         // 4. Advance
         if (next) {
@@ -378,6 +393,12 @@ export class Task<
         else if (action === 'execute') {
             return this.engine.string('task.execute.log');
         }
+        else if (action === 'update') {
+            return this.engine.string('task.update.log');
+        }
+        else if (action === 'skip') {
+            return this.engine.string('task.skip.log');
+        }
         return ''
     }
 
@@ -442,6 +463,9 @@ export class Task<
     ) {
         // 1. Get task by ID
         const task = await this.bucket.tasks.get(client, id)
+        if (task.state !== 'requested') {
+            throw NesoiError.Task.InvalidStateUpdate(this.name, task.id)
+        }
         if (!task) {
             throw NesoiError.Task.NotFound(this.name, id)
         }
@@ -454,13 +478,13 @@ export class Task<
         Object.assign(task.input, event)
         Object.assign(task.output.data, outcome)
 
-        console.log(eventRaw, event, outcome, task)
+        // console.log(eventRaw, event, outcome, task)
 
         // 3. Update task on data source
         await this.bucket.tasks.put(client, task)
 
         // 4. Log
-        // await this.logStep(client, 'update', task, eventRaw);
+        await this.logStep(client, 'update', task, eventRaw);
 
         return event
     }
